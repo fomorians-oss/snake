@@ -8,6 +8,7 @@ import numpy as np
 import tensorflow as tf
 import pyoneer as pynr
 import pyoneer.rl as pyrl
+from gym.envs.registration import register
 
 from snake import agents
 from snake.rollout import BatchRollout
@@ -21,6 +22,11 @@ def main(args):
     os.makedirs(job_dir, exist_ok=True)
 
     # Make env.
+    register(
+        id="Snake-v0",
+        entry_point="snake.env:SnakeEnv",
+        kwargs={"side_length": args.side_length},
+    )
     env = pyrl.wrappers.Batch(lambda: gym.make("Snake-v0"), batch_size=args.batch_size)
     atexit.register(env.close)
 
@@ -73,6 +79,7 @@ def main(args):
         states, actions, rewards, next_states, weights, dones = rollout(
             agent=agent, episodes=args.batch_size, render=args.render, explore=True
         )
+
         episodic_reward = tf.reduce_mean(tf.reduce_sum(rewards, axis=-1))
         lengths = tf.reduce_sum(weights, axis=1)
         mean_length = tf.reduce_mean(lengths)
@@ -80,7 +87,7 @@ def main(args):
         # Make summaries.
         tf.summary.scalar("rewards/train", episodic_reward, step=it)
         tf.summary.scalar("avg. length/train", mean_length, step=it)
-        tf.summary.histogram("actions/train", actions, step=it)
+        tf.summary.histogram("actions/train", tf.boolean_mask(actions, weights), step=it)
 
         # Fit value network.
         for i in range(args.value_steps):
@@ -100,10 +107,9 @@ def main(args):
 
                 # Compute value loss as mean squared error
                 # between predicted values and actual returns.
-                value_loss = 0.5 * tf.reduce_sum(
+                loss = tf.reduce_mean(
                     (tf.square(values - tf.stop_gradient(returns)) * weights)
                 )
-                loss = value_loss / (args.batch_size * args.max_steps)
 
             # Compute and apply value network gradients.
             variables = agent.value_trainable_variables
@@ -112,7 +118,7 @@ def main(args):
             value_optimizer.apply_gradients(zip(grads, variables))
 
             # Make summaries.
-            tf.summary.histogram("values", values, step=value_optimizer.iterations)
+            tf.summary.histogram("values", tf.boolean_mask(values, weights), step=value_optimizer.iterations)
             tf.summary.scalar("losses/critic", loss, step=value_optimizer.iterations)
             tf.summary.scalar(
                 "grad_norm/critic", grad_norm, step=value_optimizer.iterations
@@ -154,15 +160,15 @@ def main(args):
             grad_norm = tf.linalg.global_norm(grads)
             policy_optimizer.apply_gradients(zip(grads, variables))
 
-            entropy = -tf.reduce_mean(log_probs)
-            value = tf.reduce_mean(values)
+            entropy = -tf.reduce_mean(tf.boolean_mask(log_probs, weights))
+            value = tf.reduce_mean(tf.boolean_mask(values, weights))
 
             # Make summaries.
             tf.summary.histogram(
-                "policy/advantages", advantages, step=policy_optimizer.iterations
+                "policy/advantages", tf.boolean_mask(advantages, weights), step=policy_optimizer.iterations
             )
             tf.summary.histogram(
-                "policy/score", score, step=policy_optimizer.iterations
+                "policy/score", tf.boolean_mask(score, weights), step=policy_optimizer.iterations
             )
             tf.summary.scalar(
                 "losses/policy", policy_loss, step=policy_optimizer.iterations
@@ -194,7 +200,7 @@ def main(args):
             # Make summaries.
             tf.summary.scalar("rewards/eval", episodic_reward, step=it)
             tf.summary.scalar("avg. length/eval", mean_length, step=it)
-            tf.summary.histogram("actions/eval", actions, step=it)
+            tf.summary.histogram("actions/eval", tf.boolean_mask(actions, weights), step=it)
 
             # save checkpoint
             checkpoint_prefix = os.path.join(job_dir, "checkpoint")
@@ -205,6 +211,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--job-dir", type=str, required=True)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--side-length", type=int, default=8)
     parser.add_argument("--agent", type=str, default="mlp")
     parser.add_argument("--n-iter", type=int, default=10000)
     parser.add_argument("--batch-size", type=int, default=128)

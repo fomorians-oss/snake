@@ -3,9 +3,7 @@ import argparse
 import gym
 import numpy as np
 import tensorflow as tf
-import matplotlib.pyplot as plt
-
-plt.ion()
+from gym.envs.registration import register
 
 
 def main(args):
@@ -14,26 +12,37 @@ def main(args):
     tf.random.set_seed(args.seed)
 
     # Make environment.
+    register(
+        id="Snake-v0",
+        entry_point="snake.env:SnakeEnv",
+        kwargs={"side_length": args.side_length},
+    )
     env = gym.make("Snake-v0")
     state = env.reset()
+    env.render()
 
-    fig, ax = plt.subplots()
-    im = ax.matshow(np.squeeze(state))
-    plt.pause(1e-4)
-
-    action_map = {"l": 0, "r": 1, "u": 2, "d": 3}
+    actions = ["l", "r", "u", "d"]
+    actions_map = {action: i for i, action in enumerate(actions)}
 
     # Human control.
     while True:
         while True:
             action = input("> ")
-            if action in ["l", "r", "u", "d"]:
+            if action in actions:
                 break
+            else:
+                print(f"Enter an action in {actions}")
 
-        state, reward, done, _ = env.step(action_map[action])
+        state, reward, done, _ = env.step(actions_map[action])
+        env.render()
 
+        if reward == 1:
+            print("Fruit get :)")
+        
         if done:
             state = env.reset()
+            env.render()
+            print("Snake death / max steps exceeded :(")
 
 
 def parse_args():
