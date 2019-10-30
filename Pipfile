@@ -1,0 +1,20 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+gym = "*"
+matplotlib = "*"
+numpy = "*"
+pandas = "*"
+tensorflow = "==2.0.0"
+tensorflow-probability = "==0.8.0"
+fomoro-pyoneer = {editable = true,path = "/home/dan/code/pyoneer"}
+
+[requires]
+python_version = "3.7"
+
+[dev-packages]
+ipdb = "*"
+pep8 = "*"
