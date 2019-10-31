@@ -38,7 +38,7 @@ def main(args):
 
         if reward == 1:
             print("Fruit get :)")
-        
+
         if done:
             state = env.reset()
             env.render()

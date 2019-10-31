@@ -4,7 +4,6 @@ import time
 
 import gym
 import numpy as np
-import matplotlib.pyplot as plt
 from gym.envs.classic_control.rendering import SimpleImageViewer
 
 
@@ -64,7 +63,7 @@ class SnakeEnv(gym.Env):
         return self.grid.reshape(self.side_length, self.side_length, 3).astype(
             np.float32
         )
-    
+
     def _check_open_positions(self):
         return np.intersect1d(
             ar1=np.where(self.grid[..., HEAD] != 1)[0],

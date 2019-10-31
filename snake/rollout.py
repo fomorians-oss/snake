@@ -38,9 +38,9 @@ class BatchRollout:
             if render:
                 self.env.envs[0].render()
 
-            action = agent.step(
-                tf.expand_dims(state, axis=1), explore=explore
-            ).numpy()[:, 0]
+            action = agent.step(tf.expand_dims(state, axis=1), explore=explore).numpy()[
+                :, 0
+            ]
             next_state, reward, done, info = self.env.step(action)
 
             states[:, step] = state

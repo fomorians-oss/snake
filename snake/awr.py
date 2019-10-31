@@ -6,7 +6,6 @@ import argparse
 import gym
 import numpy as np
 import tensorflow as tf
-import pyoneer as pynr
 import pyoneer.rl as pyrl
 from gym.envs.registration import register
 
@@ -44,6 +43,8 @@ def main(args):
         agent = agents.ConvAgent(
             observation_space=env.observation_space, action_space=env.action_space
         )
+    else:
+        raise NotImplementedError("Enter one of 'mlp' or 'conv' for --agent argument.")
 
     # Make optimizer.
     value_optimizer = tf.keras.optimizers.Adam(
@@ -87,7 +88,9 @@ def main(args):
         # Make summaries.
         tf.summary.scalar("rewards/train", episodic_reward, step=it)
         tf.summary.scalar("avg. length/train", mean_length, step=it)
-        tf.summary.histogram("actions/train", tf.boolean_mask(actions, weights), step=it)
+        tf.summary.histogram(
+            "actions/train", tf.boolean_mask(actions, weights), step=it
+        )
 
         # Fit value network.
         for i in range(args.value_steps):
@@ -118,7 +121,11 @@ def main(args):
             value_optimizer.apply_gradients(zip(grads, variables))
 
             # Make summaries.
-            tf.summary.histogram("values", tf.boolean_mask(values, weights), step=value_optimizer.iterations)
+            tf.summary.histogram(
+                "values",
+                tf.boolean_mask(values, weights),
+                step=value_optimizer.iterations,
+            )
             tf.summary.scalar("losses/critic", loss, step=value_optimizer.iterations)
             tf.summary.scalar(
                 "grad_norm/critic", grad_norm, step=value_optimizer.iterations
@@ -145,10 +152,12 @@ def main(args):
                 # Compute estimate of policy distribution.
                 log_probs, values, probs = agent.policy_value(states, actions)
 
-                # Compute unnormalized distribution implied by scaled, exponentiated advantages.
+                # Compute unnormalized distribution
+                # from scaled, exponentiated advantages.
                 score = tf.minimum(tf.exp(advantages / args.beta), args.score_max)
 
-                # Compute policy loss as mismatch between policy and scaled advantage distribution.
+                # Compute policy loss as mismatch between
+                # policy and scaled advantage distribution.
                 policy_loss = -tf.reduce_sum(
                     tf.squeeze(log_probs) * tf.stop_gradient(score) * weights
                 )
@@ -165,10 +174,14 @@ def main(args):
 
             # Make summaries.
             tf.summary.histogram(
-                "policy/advantages", tf.boolean_mask(advantages, weights), step=policy_optimizer.iterations
+                "policy/advantages",
+                tf.boolean_mask(advantages, weights),
+                step=policy_optimizer.iterations,
             )
             tf.summary.histogram(
-                "policy/score", tf.boolean_mask(score, weights), step=policy_optimizer.iterations
+                "policy/score",
+                tf.boolean_mask(score, weights),
+                step=policy_optimizer.iterations,
             )
             tf.summary.scalar(
                 "losses/policy", policy_loss, step=policy_optimizer.iterations
@@ -200,7 +213,9 @@ def main(args):
             # Make summaries.
             tf.summary.scalar("rewards/eval", episodic_reward, step=it)
             tf.summary.scalar("avg. length/eval", mean_length, step=it)
-            tf.summary.histogram("actions/eval", tf.boolean_mask(actions, weights), step=it)
+            tf.summary.histogram(
+                "actions/eval", tf.boolean_mask(actions, weights), step=it
+            )
 
             # save checkpoint
             checkpoint_prefix = os.path.join(job_dir, "checkpoint")
@@ -211,11 +226,11 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--job-dir", type=str, required=True)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--side-length", type=int, default=8)
+    parser.add_argument("--side-length", type=int, default=6)
     parser.add_argument("--agent", type=str, default="mlp")
     parser.add_argument("--n-iter", type=int, default=10000)
-    parser.add_argument("--batch-size", type=int, default=128)
-    parser.add_argument("--max-steps", type=int, default=100)
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--max-steps", type=int, default=150)
     parser.add_argument("--value-steps", type=int, default=10)
     parser.add_argument("--policy-steps", type=int, default=10)
     parser.add_argument("--valid-every", type=int, default=10)
