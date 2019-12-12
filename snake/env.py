@@ -74,7 +74,7 @@ class SnakeEnv(gym.Env):
         if self.egocentric:
             extent = self.egocentric_side_length // 2
             grid = self.grid.reshape(self.side_length, self.side_length, 3)
-            grid = tf.pad(
+            grid = np.pad(
                 grid,
                 pad_width=((extent, extent), (extent, extent), (0, 0)),
                 constant_values=-1,
@@ -87,70 +87,44 @@ class SnakeEnv(gym.Env):
                 snake_row - extent : snake_row + extent + 1,
                 snake_column - extent : snake_column + extent + 1,
             ]
-            obs = tf.cast(obs, tf.float32)
+            obs = obs.astype(np.float32)
         else:
-            obs = tf.reshape(self.grid, [self.side_length, self.side_length, 3])
-            obs = tf.cast(obs, tf.float32)
+            obs = np.reshape(self.grid, [self.side_length, self.side_length, 3])
+            obs = obs.astype(np.float32)
 
         return obs
 
     def _check_open_positions(self):
-        return tf.cast(tf.where((self.grid[..., HEAD] + self.grid[..., BODY]) == 0)[:, 0], tf.int32)
+        return np.intersect1d(
+            ar1=np.where(self.grid[..., HEAD] != 1)[0],
+            ar2=np.where(self.grid[..., BODY] != 1)[0],
+        )
 
     def _reset_grid_and_snake(self):
-        self.grid = tf.zeros([self.side_length ** 2, 3])
-        self.snake_position = tf.random.uniform(
-            (), minval=0, maxval=self.side_length ** 2, dtype=tf.int32
-        )
-        self.grid = tf.tensor_scatter_nd_update(
-            self.grid, [[self.snake_position, HEAD]], [1]
-        )
+        self.grid = np.zeros([self.side_length ** 2, 3])
+        self.snake_position = np.random.randint(self.side_length ** 2)
+        self.grid[self.snake_position, HEAD] = 1
 
     def _reset_fruit(self):
-        self.grid = tf.transpose(
-            tf.tensor_scatter_nd_update(
-                tf.transpose(self.grid), [[FRUIT]], [tf.zeros([self.side_length ** 2])]
-            )
-        )
-        open_positions = self._check_open_positions()
-        n_open_positions = tf.shape(open_positions)[0]
-        fruit_index = tf.random.uniform(
-            (), minval=0, maxval=n_open_positions, dtype=tf.int32
-        )
-        self.fruit_position = open_positions[fruit_index]
-        self.grid = tf.tensor_scatter_nd_update(
-            self.grid, [[self.fruit_position, FRUIT]], [1]
-        )
+        self.grid[..., FRUIT] = 0
+        self.fruit_position = np.random.choice(self._check_open_positions())
+        self.grid[self.fruit_position, FRUIT] = 1
     
     def _get_fruit(self):
         self.length += 1
-        self.grid = tf.tensor_scatter_nd_update(
-            self.grid, [[self.queue[-1], BODY]], [1]
-        )
-        self.grid = tf.tensor_scatter_nd_update(
-            self.grid, [[self.queue[-1], HEAD]], [0]
-        )
+        self.grid[self.queue[-1], BODY] = 1
+        self.grid[self.queue[-1], HEAD] = 0
         self.queue.append(self.snake_position)
-        self.grid = tf.tensor_scatter_nd_update(
-            self.grid, [[self.snake_position, HEAD]], [1]
-        )
+        self.grid[self.snake_position, HEAD] = 1
 
     def _no_fruit(self):
-        self.grid = tf.tensor_scatter_nd_update(
-            self.grid, [[self.queue[-1], BODY]], [1]
-        )
-        self.grid = tf.tensor_scatter_nd_update(
-            self.grid, [[self.queue[-1], HEAD]], [0]
-        )
+        self.grid[self.queue[-1], BODY] = 1
+        self.grid[self.queue[-1], HEAD] = 0
         self.queue.append(self.snake_position)
-        self.grid = tf.tensor_scatter_nd_update(
-            self.grid, [[self.snake_position, HEAD]], [1]
-        )
+        self.grid[self.snake_position, HEAD] = 1
 
         last_position = self.queue.popleft()
-        self.grid = tf.tensor_scatter_nd_update(
-            self.grid, [[last_position, BODY]], [0]
-        )
+        self.grid[last_position, BODY] = 0
 
     def reset(self):
         self._reset_grid_and_snake()
