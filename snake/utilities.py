@@ -141,10 +141,13 @@ def generalized_advantage_estimate(
         if not time_major:
             rank_list = list(range(2, rewards_rank))
             advantages = tf.transpose(advantages, [1, 0] + rank_list)
+        
         advantages = advantages * weights
         advantages = tf.debugging.check_numerics(advantages, "Advantages")
+        
         if not back_prop:
             advantages = tf.stop_gradient(advantages)
+        
         return advantages
 
 

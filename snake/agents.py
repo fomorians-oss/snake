@@ -81,7 +81,7 @@ class MLPAgent(tf.Module):
         value = tf.squeeze(self._value(hidden), axis=-1)
         return value
 
-    def policy(self, state):
+    def policy(self, state, reset_states=False):
         hidden = self._hidden(state)
         logits = self._logits(hidden)
         policy = tfp.distributions.Categorical(logits=logits)
@@ -98,7 +98,7 @@ class MLPAgent(tf.Module):
         return log_probs, values, probs
 
     @tf.function
-    def step(self, state, explore=True):
+    def step(self, state, explore=True, reset_states=False):
         policy = self.policy(state)
 
         if explore:
@@ -223,7 +223,7 @@ class ConvAgent(tf.Module):
     @tf.function
     def _hidden(self, state):
         state = self._scale_state(state)
-        
+
         input_shape = tf.shape(state)
         batch_size = input_shape[0]
         time = input_shape[1]
@@ -246,7 +246,7 @@ class ConvAgent(tf.Module):
         value = tf.squeeze(self._value(hidden), axis=-1)
         return value
 
-    def policy(self, state):
+    def policy(self, state, reset_states=False):
         hidden = self._hidden(state)
         logits = self._logits(hidden)
         policy = tfp.distributions.Categorical(logits=logits)
@@ -263,8 +263,123 @@ class ConvAgent(tf.Module):
         return log_probs, values, probs
 
     @tf.function
-    def step(self, state, explore=True):
+    def step(self, state, explore=True, reset_states=False):
         policy = self.policy(state)
+
+        if explore:
+            action = policy.sample()
+        else:
+            action = policy.mode()
+
+        return action
+
+
+class GRUAgent(tf.Module):
+    def __init__(self, observation_space, action_space):
+        super(GRUAgent, self).__init__()
+
+        self.observation_space = observation_space
+        self.action_space = action_space
+
+        # Weights initializers.
+        kernel_initializer = tf.initializers.VarianceScaling(scale=2.0)
+        logits_initializer = tf.initializers.VarianceScaling(scale=1.0)
+
+        # Hidden layers.
+        self._dense1 = tf.keras.layers.Dense(
+            units=128, activation=tf.nn.relu, kernel_initializer=kernel_initializer
+        )
+        self._dense2 = tf.keras.layers.Dense(
+            units=128, activation=tf.nn.relu, kernel_initializer=kernel_initializer
+        )
+        self._gru = tf.keras.layers.GRU(
+            units=128, return_sequences=True, return_state=True
+        )
+        self.hidden_state = None  # GRU hidden state.
+
+        # Output layers (logits for policy, value head).
+        self._logits = tf.keras.layers.Dense(
+            units=action_space.n, kernel_initializer=logits_initializer
+        )
+        self._value = tf.keras.layers.Dense(1)
+
+    @property
+    def value_trainable_variables(self):
+        return (
+            self._dense1.trainable_variables
+            + self._dense2.trainable_variables
+            + self._value.trainable_variables
+        )
+
+    @property
+    def policy_trainable_variables(self):
+        return (
+            self._dense1.trainable_variables
+            + self._dense2.trainable_variables
+            + self._gru.trainable_variables
+            + self._logits.trainable_variables
+        )
+
+    def _scale_state(self, state):
+        state = tf.cast(state, dtype=tf.float32)
+        observation_high = np.where(
+            self.observation_space.high < np.finfo(np.float32).max,
+            self.observation_space.high,
+            +1.0,
+        )
+        observation_low = np.where(
+            self.observation_space.low > np.finfo(np.float32).min,
+            self.observation_space.low,
+            -1.0,
+        )
+
+        observation_mean, observation_var = pynr.moments.range_moments(
+            observation_low, observation_high
+        )
+        state_norm = tf.math.divide_no_nan(
+            state - observation_mean, tf.sqrt(observation_var)
+        )
+        return state
+
+    # @tf.function
+    def _hidden(self, state):
+        state = self._scale_state(state)
+        batch_size, time_steps = tf.shape(state)[0], tf.shape(state)[1]
+        state = tf.reshape(state, [batch_size, time_steps, -1])
+        hidden = self._dense2(self._dense1(state))
+        return hidden
+
+    # @tf.function
+    def value(self, state):
+        hidden = self._hidden(state)
+        value = tf.squeeze(self._value(hidden), axis=-1)
+        return value
+
+    def policy(self, state, reset_states=False):
+        batch_size = tf.shape(state)[0]
+        hidden = self._hidden(state)
+
+        if reset_states:
+            self.hidden_state = tf.zeros([batch_size, self._gru.units])
+
+        hidden, self.hidden_state = self._gru(hidden, initial_state=self.hidden_state)
+        logits = self._logits(hidden)
+        policy = tfp.distributions.Categorical(logits=logits)
+        return policy
+
+    # @tf.function
+    def policy_value(self, state, action):
+        policy = self.policy(state, reset_states=True)
+        values = self.value(state)
+
+        log_probs = policy.log_prob(action)
+        probs = policy.probs_parameter()
+
+        return log_probs, values, probs
+
+    # @tf.function
+    def step(self, state, explore=True, reset_states=False):
+        policy = self.policy(state, reset_states=reset_states)
 
         if explore:
             action = policy.sample()

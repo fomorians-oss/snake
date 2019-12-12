@@ -15,7 +15,11 @@ def main(args):
     register(
         id="Snake-v0",
         entry_point="snake.env:SnakeEnv",
-        kwargs={"side_length": args.side_length},
+        kwargs={
+            "side_length": args.side_length,
+            "egocentric": args.egocentric,
+            "egocentric_side_length": args.egocentric_side_length,
+        },
     )
     env = gym.make("Snake-v0")
     state = env.reset()
@@ -38,7 +42,7 @@ def main(args):
 
         if reward == 1:
             print("Fruit get :)")
-        
+
         if done:
             state = env.reset()
             env.render()
@@ -48,6 +52,9 @@ def main(args):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--side-length", type=int, default=10)
+    parser.add_argument("--egocentric", action="store_true")
+    parser.add_argument("--egocentric-side-length", type=int, default=5)
     return parser.parse_args()
 
 

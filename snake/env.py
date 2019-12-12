@@ -4,6 +4,7 @@ import time
 
 import gym
 import numpy as np
+import tensorflow as tf
 import matplotlib.pyplot as plt
 from gym.envs.classic_control.rendering import SimpleImageViewer
 
@@ -41,18 +42,27 @@ def _repeat_axes(x, factor, axis=[0, 1]):
 class SnakeEnv(gym.Env):
     """Implements an OpenAI gym interface to the classic Snake video game."""
 
-    def __init__(self, side_length=8):
+    def __init__(self, side_length=8, egocentric=False, egocentric_side_length=3):
+        assert (
+            egocentric_side_length % 2 == 1
+        ), "Egocentric perspective view must have odd-length sides."
+
         self.side_length = side_length
+        self.egocentric = egocentric
+        self.egocentric_side_length = egocentric_side_length
+
         self.action_space = gym.spaces.Discrete(4)
-        self.observation_space = gym.spaces.Box(
-            low=-1.0, high=1.0, shape=(side_length, side_length, 3)
-        )
 
-        self._reset_grid_and_snake()
-        self._reset_fruit()
-
-        self.length = 1
-        self.queue = deque([self.snake_position])
+        if egocentric:
+            self.observation_space = gym.spaces.Box(
+                low=-1.0,
+                high=1.0,
+                shape=(egocentric_side_length, egocentric_side_length, 3),
+            )
+        else:
+            self.observation_space = gym.spaces.Box(
+                low=-1.0, high=1.0, shape=(side_length, side_length, 3)
+            )
 
         self.viewer = None
         self.resize_scale = 64
@@ -60,26 +70,93 @@ class SnakeEnv(gym.Env):
 
         self._max_episode_steps = 100
 
+    # @tf.function
     def _get_obs(self):
-        return self.grid.reshape(self.side_length, self.side_length, 3).astype(
-            np.float32
+        if self.egocentric:
+            extent = self.egocentric_side_length // 2
+            grid = self.grid.reshape(self.side_length, self.side_length, 3)
+            grid = tf.pad(
+                grid,
+                pad_width=((extent, extent), (extent, extent), (0, 0)),
+                constant_values=-1,
+            )
+
+            snake_row = self.snake_position // self.side_length + extent
+            snake_column = self.snake_position % self.side_length + extent
+
+            obs = grid[
+                snake_row - extent : snake_row + extent + 1,
+                snake_column - extent : snake_column + extent + 1,
+            ]
+            obs = tf.cast(obs, tf.float32)
+        else:
+            obs = tf.reshape(self.grid, [self.side_length, self.side_length, 3])
+            obs = tf.cast(obs, tf.float32)
+
+        return obs
+
+    # @tf.function
+    def _check_open_positions(self):
+        return tf.cast(tf.where((self.grid[..., HEAD] + self.grid[..., BODY]) == 0)[:, 0], tf.int32)
+
+    # @tf.function
+    def _reset_grid_and_snake(self):
+        self.grid = tf.zeros([self.side_length ** 2, 3])
+        self.snake_position = tf.random.uniform(
+            (), minval=0, maxval=self.side_length ** 2, dtype=tf.int32
+        )
+        self.grid = tf.tensor_scatter_nd_update(
+            self.grid, [[self.snake_position, HEAD]], [1]
+        )
+
+    # @tf.function
+    def _reset_fruit(self):
+        self.grid = tf.transpose(
+            tf.tensor_scatter_nd_update(
+                tf.transpose(self.grid), [[FRUIT]], [tf.zeros([self.side_length ** 2])]
+            )
+        )
+        open_positions = self._check_open_positions()
+        n_open_positions = tf.shape(open_positions)[0]
+        fruit_index = tf.random.uniform(
+            (), minval=0, maxval=n_open_positions, dtype=tf.int32
+        )
+        self.fruit_position = open_positions[fruit_index]
+        self.grid = tf.tensor_scatter_nd_update(
+            self.grid, [[self.fruit_position, FRUIT]], [1]
         )
     
-    def _check_open_positions(self):
-        return np.intersect1d(
-            ar1=np.where(self.grid[..., HEAD] != 1)[0],
-            ar2=np.where(self.grid[..., BODY] != 1)[0],
+    # @tf.function
+    def _get_fruit(self):
+        self.length += 1
+        self.grid = tf.tensor_scatter_nd_update(
+            self.grid, [[self.queue[-1], BODY]], [1]
+        )
+        self.grid = tf.tensor_scatter_nd_update(
+            self.grid, [[self.queue[-1], HEAD]], [0]
+        )
+        self.queue.append(self.snake_position)
+        self.grid = tf.tensor_scatter_nd_update(
+            self.grid, [[self.snake_position, HEAD]], [1]
         )
 
-    def _reset_grid_and_snake(self):
-        self.grid = np.zeros([self.side_length ** 2, 3])
-        self.snake_position = np.random.randint(self.side_length ** 2)
-        self.grid[self.snake_position, HEAD] = 1
+    # @tf.function
+    def _no_fruit(self):
+        self.grid = tf.tensor_scatter_nd_update(
+            self.grid, [[self.queue[-1], BODY]], [1]
+        )
+        self.grid = tf.tensor_scatter_nd_update(
+            self.grid, [[self.queue[-1], HEAD]], [0]
+        )
+        self.queue.append(self.snake_position)
+        self.grid = tf.tensor_scatter_nd_update(
+            self.grid, [[self.snake_position, HEAD]], [1]
+        )
 
-    def _reset_fruit(self):
-        self.grid[..., FRUIT] = 0
-        self.fruit_position = np.random.choice(self._check_open_positions())
-        self.grid[self.fruit_position, FRUIT] = 1
+        last_position = self.queue.popleft()
+        self.grid = tf.tensor_scatter_nd_update(
+            self.grid, [[last_position, BODY]], [0]
+        )
 
     def reset(self):
         self._reset_grid_and_snake()
@@ -111,13 +188,8 @@ class SnakeEnv(gym.Env):
             else:
                 if (snake_row, snake_column - 1) == (fruit_row, fruit_column):
                     reward = FRUIT_REWARD
-
-                    self.length += 1
                     self.snake_position = next_snake_position
-                    self.grid[self.queue[-1], BODY] = 1
-                    self.grid[self.queue[-1], HEAD] = 0
-                    self.queue.append(self.snake_position)
-                    self.grid[self.snake_position, HEAD] = 1
+                    self._get_fruit()
 
                     if len(self._check_open_positions()) == 0:
                         done = True
@@ -125,13 +197,7 @@ class SnakeEnv(gym.Env):
                         self._reset_fruit()
                 else:
                     self.snake_position = next_snake_position
-                    self.grid[self.queue[-1], BODY] = 1
-                    self.grid[self.queue[-1], HEAD] = 0
-                    self.queue.append(self.snake_position)
-                    self.grid[self.snake_position, HEAD] = 1
-
-                    last_position = self.queue.popleft()
-                    self.grid[last_position] = 0
+                    self._no_fruit()
 
         elif action == RIGHT:
             next_snake_position = self.side_length * snake_row + snake_column + 1
@@ -145,13 +211,8 @@ class SnakeEnv(gym.Env):
             else:
                 if (snake_row, snake_column + 1) == (fruit_row, fruit_column):
                     reward = FRUIT_REWARD
-
-                    self.length += 1
                     self.snake_position = next_snake_position
-                    self.grid[self.queue[-1], BODY] = 1
-                    self.grid[self.queue[-1], HEAD] = 0
-                    self.queue.append(self.snake_position)
-                    self.grid[self.snake_position, HEAD] = 1
+                    self._get_fruit()
 
                     if len(self._check_open_positions()) == 0:
                         done = True
@@ -159,13 +220,7 @@ class SnakeEnv(gym.Env):
                         self._reset_fruit()
                 else:
                     self.snake_position = next_snake_position
-                    self.grid[self.queue[-1], BODY] = 1
-                    self.grid[self.queue[-1], HEAD] = 0
-                    self.queue.append(self.snake_position)
-                    self.grid[self.snake_position, HEAD] = 1
-
-                    last_position = self.queue.popleft()
-                    self.grid[last_position] = 0
+                    self._no_fruit()
 
         elif action == UP:
             next_snake_position = self.side_length * (snake_row - 1) + snake_column
@@ -176,13 +231,8 @@ class SnakeEnv(gym.Env):
             else:
                 if (snake_row - 1, snake_column) == (fruit_row, fruit_column):
                     reward = FRUIT_REWARD
-
-                    self.length += 1
                     self.snake_position = next_snake_position
-                    self.grid[self.queue[-1], BODY] = 1
-                    self.grid[self.queue[-1], HEAD] = 0
-                    self.queue.append(self.snake_position)
-                    self.grid[self.snake_position, HEAD] = 1
+                    self._get_fruit()
 
                     if len(self._check_open_positions()) == 0:
                         done = True
@@ -190,13 +240,8 @@ class SnakeEnv(gym.Env):
                         self._reset_fruit()
                 else:
                     self.snake_position = next_snake_position
-                    self.grid[self.queue[-1], BODY] = 1
-                    self.grid[self.queue[-1], HEAD] = 0
-                    self.queue.append(self.snake_position)
-                    self.grid[self.snake_position, HEAD] = 1
+                    self._no_fruit()
 
-                    last_position = self.queue.popleft()
-                    self.grid[last_position] = 0
 
         elif action == DOWN:
             next_snake_position = self.side_length * (snake_row + 1) + snake_column
@@ -207,13 +252,8 @@ class SnakeEnv(gym.Env):
             else:
                 if (snake_row + 1, snake_column) == (fruit_row, fruit_column):
                     reward = FRUIT_REWARD
-
-                    self.length += 1
                     self.snake_position = next_snake_position
-                    self.grid[self.queue[-1], BODY] = 1
-                    self.grid[self.queue[-1], HEAD] = 0
-                    self.queue.append(self.snake_position)
-                    self.grid[self.snake_position, HEAD] = 1
+                    self._get_fruit()
 
                     if len(self._check_open_positions()) == 0:
                         done = True
@@ -221,13 +261,7 @@ class SnakeEnv(gym.Env):
                         self._reset_fruit()
                 else:
                     self.snake_position = next_snake_position
-                    self.grid[self.queue[-1], BODY] = 1
-                    self.grid[self.queue[-1], HEAD] = 0
-                    self.queue.append(self.snake_position)
-                    self.grid[self.snake_position, HEAD] = 1
-
-                    last_position = self.queue.popleft()
-                    self.grid[last_position] = 0
+                    self._no_fruit()
 
         state = self._get_obs()
         return state, reward, done, {}
@@ -241,7 +275,8 @@ class SnakeEnv(gym.Env):
         Returns:
             3D np.array (np.uint8) or a `viewer.isopen`.
         """
-        img = self._get_obs()
+        img = self._get_obs().numpy()
+        img = np.abs(img)
         img = _repeat_axes(img, factor=50, axis=[0, 1])
         img *= 255
 

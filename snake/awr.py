@@ -25,7 +25,11 @@ def main(args):
     register(
         id="Snake-v0",
         entry_point="snake.env:SnakeEnv",
-        kwargs={"side_length": args.side_length},
+        kwargs={
+            "side_length": args.side_length,
+            "egocentric": args.egocentric,
+            "egocentric_side_length": args.egocentric_side_length,
+        },
     )
     env = pyrl.wrappers.Batch(lambda: gym.make("Snake-v0"), batch_size=args.batch_size)
     atexit.register(env.close)
@@ -44,6 +48,12 @@ def main(args):
         agent = agents.ConvAgent(
             observation_space=env.observation_space, action_space=env.action_space
         )
+    elif args.agent == "gru":
+        agent = agents.GRUAgent(
+            observation_space=env.observation_space, action_space=env.action_space
+        )
+    else:
+        raise NotImplementedError("Choose one of 'mlp', 'conv', or 'gru'.")
 
     # Make optimizer.
     value_optimizer = tf.keras.optimizers.Adam(
@@ -87,13 +97,12 @@ def main(args):
         # Make summaries.
         tf.summary.scalar("rewards/train", episodic_reward, step=it)
         tf.summary.scalar("avg. length/train", mean_length, step=it)
-        tf.summary.histogram("actions/train", tf.boolean_mask(actions, weights), step=it)
+        tf.summary.histogram(
+            "actions/train", tf.boolean_mask(actions, weights), step=it
+        )
 
         # Fit value network.
         for i in range(args.value_steps):
-            # Get bootstrap values if training on one-step rollouts.
-            next_value = agent.value(next_states)
-
             # Compute discounted returns to use as value network regression targets.
             returns = discounted_returns(
                 rewards=tf.cast(rewards, tf.float32) * weights,
@@ -118,7 +127,11 @@ def main(args):
             value_optimizer.apply_gradients(zip(grads, variables))
 
             # Make summaries.
-            tf.summary.histogram("values", tf.boolean_mask(values, weights), step=value_optimizer.iterations)
+            tf.summary.histogram(
+                "values",
+                tf.boolean_mask(values, weights),
+                step=value_optimizer.iterations,
+            )
             tf.summary.scalar("losses/critic", loss, step=value_optimizer.iterations)
             tf.summary.scalar(
                 "grad_norm/critic", grad_norm, step=value_optimizer.iterations
@@ -128,9 +141,6 @@ def main(args):
         for i in range(args.policy_steps):
             # Compute value baseline.
             values = agent.value(states)
-
-            # Get bootstrap values if training on one-step rollouts.
-            next_value = agent.value(next_states)
 
             # Compute advantages using TD(lambda).
             advantages = generalized_advantage_estimate(
@@ -165,10 +175,14 @@ def main(args):
 
             # Make summaries.
             tf.summary.histogram(
-                "policy/advantages", tf.boolean_mask(advantages, weights), step=policy_optimizer.iterations
+                "policy/advantages",
+                tf.boolean_mask(advantages, weights),
+                step=policy_optimizer.iterations,
             )
             tf.summary.histogram(
-                "policy/score", tf.boolean_mask(score, weights), step=policy_optimizer.iterations
+                "policy/score",
+                tf.boolean_mask(score, weights),
+                step=policy_optimizer.iterations,
             )
             tf.summary.scalar(
                 "losses/policy", policy_loss, step=policy_optimizer.iterations
@@ -200,7 +214,9 @@ def main(args):
             # Make summaries.
             tf.summary.scalar("rewards/eval", episodic_reward, step=it)
             tf.summary.scalar("avg. length/eval", mean_length, step=it)
-            tf.summary.histogram("actions/eval", tf.boolean_mask(actions, weights), step=it)
+            tf.summary.histogram(
+                "actions/eval", tf.boolean_mask(actions, weights), step=it
+            )
 
             # save checkpoint
             checkpoint_prefix = os.path.join(job_dir, "checkpoint")
@@ -215,7 +231,7 @@ def parse_args():
     parser.add_argument("--agent", type=str, default="mlp")
     parser.add_argument("--n-iter", type=int, default=10000)
     parser.add_argument("--batch-size", type=int, default=128)
-    parser.add_argument("--max-steps", type=int, default=100)
+    parser.add_argument("--max-steps", type=int, default=200)
     parser.add_argument("--value-steps", type=int, default=10)
     parser.add_argument("--policy-steps", type=int, default=10)
     parser.add_argument("--valid-every", type=int, default=10)
@@ -225,6 +241,8 @@ def parse_args():
     parser.add_argument("--beta", type=float, default=0.05)
     parser.add_argument("--score-max", type=float, default=100.0)
     parser.add_argument("--render", action="store_true")
+    parser.add_argument("--egocentric", action="store_true")
+    parser.add_argument("--egocentric-side-length", type=int, default=7)
     return parser.parse_args()
 
 
