@@ -1,3 +1,4 @@
 jobs/
 snake.egg-info/
 __pycache__/
+.idea/

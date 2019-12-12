@@ -70,7 +70,6 @@ class SnakeEnv(gym.Env):
 
         self._max_episode_steps = 100
 
-    # @tf.function
     def _get_obs(self):
         if self.egocentric:
             extent = self.egocentric_side_length // 2
@@ -95,11 +94,9 @@ class SnakeEnv(gym.Env):
 
         return obs
 
-    # @tf.function
     def _check_open_positions(self):
         return tf.cast(tf.where((self.grid[..., HEAD] + self.grid[..., BODY]) == 0)[:, 0], tf.int32)
 
-    # @tf.function
     def _reset_grid_and_snake(self):
         self.grid = tf.zeros([self.side_length ** 2, 3])
         self.snake_position = tf.random.uniform(
@@ -109,7 +106,6 @@ class SnakeEnv(gym.Env):
             self.grid, [[self.snake_position, HEAD]], [1]
         )
 
-    # @tf.function
     def _reset_fruit(self):
         self.grid = tf.transpose(
             tf.tensor_scatter_nd_update(
@@ -126,7 +122,6 @@ class SnakeEnv(gym.Env):
             self.grid, [[self.fruit_position, FRUIT]], [1]
         )
     
-    # @tf.function
     def _get_fruit(self):
         self.length += 1
         self.grid = tf.tensor_scatter_nd_update(
@@ -140,7 +135,6 @@ class SnakeEnv(gym.Env):
             self.grid, [[self.snake_position, HEAD]], [1]
         )
 
-    # @tf.function
     def _no_fruit(self):
         self.grid = tf.tensor_scatter_nd_update(
             self.grid, [[self.queue[-1], BODY]], [1]

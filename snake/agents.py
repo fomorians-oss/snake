@@ -1,5 +1,3 @@
-import math
-
 import numpy as np
 import pyoneer as pynr
 import tensorflow as tf
@@ -66,7 +64,7 @@ class MLPAgent(tf.Module):
         state_norm = tf.math.divide_no_nan(
             state - observation_mean, tf.sqrt(observation_var)
         )
-        return state
+        return state_norm
 
     @tf.function
     def _hidden(self, state):
@@ -218,7 +216,7 @@ class ConvAgent(tf.Module):
         state_norm = tf.math.divide_no_nan(
             state - observation_mean, tf.sqrt(observation_var)
         )
-        return state
+        return state_norm
 
     @tf.function
     def _hidden(self, state):
@@ -236,7 +234,7 @@ class ConvAgent(tf.Module):
         hidden = self._conv1(state)
         hidden = self._downsample1(hidden)
         hidden = self._residual_block1(hidden)
-        hidden = tf.reshape(hidden, [batch_size, time, self._residual_block1.filters])
+        hidden = tf.reshape(hidden, [batch_size, time, -1])
         hidden = self._dense_hidden(hidden)
         return hidden
 

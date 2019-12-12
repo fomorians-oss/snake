@@ -6,7 +6,6 @@ import argparse
 import gym
 import numpy as np
 import tensorflow as tf
-import pyoneer as pynr
 import pyoneer.rl as pyrl
 from gym.envs.registration import register
 
@@ -155,10 +154,12 @@ def main(args):
                 # Compute estimate of policy distribution.
                 log_probs, values, probs = agent.policy_value(states, actions)
 
-                # Compute unnormalized distribution implied by scaled, exponentiated advantages.
+                # Compute unnormalized distribution
+                # from scaled, exponentiated advantages.
                 score = tf.minimum(tf.exp(advantages / args.beta), args.score_max)
 
-                # Compute policy loss as mismatch between policy and scaled advantage distribution.
+                # Compute policy loss as mismatch between
+                # policy and scaled advantage distribution.
                 policy_loss = -tf.reduce_sum(
                     tf.squeeze(log_probs) * tf.stop_gradient(score) * weights
                 )
@@ -227,7 +228,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--job-dir", type=str, required=True)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--side-length", type=int, default=8)
+    parser.add_argument("--side-length", type=int, default=6)
     parser.add_argument("--agent", type=str, default="mlp")
     parser.add_argument("--n-iter", type=int, default=10000)
     parser.add_argument("--batch-size", type=int, default=128)
